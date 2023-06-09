@@ -23,7 +23,7 @@ from aiohttp import (
 
 from .utils import flatten, log_json, log_msg, log_timer, output_reader
 
-IP_SCRIPT_DIR = "demo"
+IP_SCRIPT_DIR = "runners"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,26 +42,27 @@ TRACE_ENABLED = os.getenv("TRACE_ENABLED")
 
 WEBHOOK_TARGET = os.getenv("WEBHOOK_TARGET")
 
-AGENT_ENDPOINT = None
-if os.popen("uname").read().strip() == "Darwin":
-    # determine if we need to go back to find the script
-    wd = os.popen("pwd").read().strip().split("/")
-    proj_i = 0
-    for i in range(len(wd)):
-        if wd[i] == IP_SCRIPT_DIR:
-            proj_i = i
-            break
-    back = len(wd) - proj_i - 1
+AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
+if AGENT_ENDPOINT is None:
+    if os.popen("uname").read().strip() == "Darwin":
+        # determine if we need to go back to find the script
+        wd = os.popen("pwd").read().strip().split("/")
+        proj_i = 0
+        for i in range(len(wd)):
+            if wd[i] == IP_SCRIPT_DIR:
+                proj_i = i
+                break
+        back = len(wd) - proj_i - 1
 
-    # run the script
-    if back == 0:
-        AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
-    else:
-        command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
-        AGENT_ENDPOINT = os.popen(command).read().strip()
+        # run the script
+        if back == 0:
+            AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
+        else:
+            command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
+            AGENT_ENDPOINT = os.popen(command).read().strip()
 
-elif os.popen("uname").read().strip() == "Linux":
-    AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
+    elif os.popen("uname").read().strip() == "Linux":
+        AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
 
 DEFAULT_POSTGRES = bool(os.getenv("POSTGRES"))
 DEFAULT_INTERNAL_HOST = "127.0.0.1"
