@@ -23,7 +23,7 @@ from aiohttp import (
 
 from .utils import flatten, log_json, log_msg, log_timer, output_reader
 
-PROJECT_NAME = "RasPi-DIDComm-weather-monitoring"
+IP_SCRIPT_DIR = "demo"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ if os.popen("uname").read().strip() == "Darwin":
     wd = os.popen("pwd").read().strip().split("/")
     proj_i = 0
     for i in range(len(wd)):
-        if wd[i] == PROJECT_NAME:
+        if wd[i] == IP_SCRIPT_DIR:
             proj_i = i
             break
     back = len(wd) - proj_i - 1
