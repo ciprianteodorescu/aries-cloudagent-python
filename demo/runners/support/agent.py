@@ -23,6 +23,8 @@ from aiohttp import (
 
 from .utils import flatten, log_json, log_msg, log_timer, output_reader
 
+PROJECT_NAME = "RasPi-DIDComm-weather-monitoring"
+
 LOGGER = logging.getLogger(__name__)
 
 event_stream_handler = logging.StreamHandler()
@@ -40,30 +42,41 @@ TRACE_ENABLED = os.getenv("TRACE_ENABLED")
 
 WEBHOOK_TARGET = os.getenv("WEBHOOK_TARGET")
 
-AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
+AGENT_ENDPOINT = None
+if os.popen("uname").read().strip() == "Darwin":
+    # determine if we need to go back to find the script
+    wd = os.popen("pwd").read().strip().split("/")
+    proj_i = 0
+    for i in range(len(wd)):
+        if wd[i] == PROJECT_NAME:
+            proj_i = i
+            break
+    back = len(wd) - proj_i - 1
+
+    # run the script
+    if back == 0:
+        AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
+    else:
+        command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
+        AGENT_ENDPOINT = os.popen(command).read().strip()
+
+elif os.popen("uname").read().strip() == "Linux":
+    AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
 
 DEFAULT_POSTGRES = bool(os.getenv("POSTGRES"))
 DEFAULT_INTERNAL_HOST = "127.0.0.1"
-DEFAULT_EXTERNAL_HOST = "localhost"
+DEFAULT_EXTERNAL_HOST = AGENT_ENDPOINT
 DEFAULT_PYTHON_PATH = ".."
 PYTHON = os.getenv("PYTHON", sys.executable)
 
 START_TIMEOUT = float(os.getenv("START_TIMEOUT", 30.0))
 
-RUN_MODE = os.getenv("RUNMODE")
-
 GENESIS_URL = os.getenv("GENESIS_URL")
-LEDGER_URL = os.getenv("LEDGER_URL")
+# TODO: uncomment next line?
+# LEDGER_URL = os.getenv("LEDGER_URL")
+# TODO: delete next line?
+LEDGER_URL = "http://dev.greenlight.bcovrin.vonx.io"
 GENESIS_FILE = os.getenv("GENESIS_FILE")
-
-if RUN_MODE == "docker":
-    DEFAULT_INTERNAL_HOST = os.getenv("DOCKERHOST") or "host.docker.internal"
-    DEFAULT_EXTERNAL_HOST = DEFAULT_INTERNAL_HOST
-    DEFAULT_PYTHON_PATH = "."
-elif RUN_MODE == "pwd":
-    # DEFAULT_INTERNAL_HOST =
-    DEFAULT_EXTERNAL_HOST = os.getenv("DOCKERHOST") or "host.docker.internal"
-    DEFAULT_PYTHON_PATH = "."
 
 CRED_FORMAT_INDY = "indy"
 CRED_FORMAT_JSON_LD = "json-ld"
@@ -87,26 +100,9 @@ class repr_json:
 async def default_genesis_txns():
     genesis = None
     try:
-        if GENESIS_URL:
-            async with ClientSession() as session:
-                async with session.get(GENESIS_URL) as resp:
-                    genesis = await resp.text()
-        elif RUN_MODE == "docker":
-            async with ClientSession() as session:
-                async with session.get(
-                    f"http://{DEFAULT_EXTERNAL_HOST}:9000/genesis"
-                ) as resp:
-                    genesis = await resp.text()
-        elif GENESIS_FILE:
-            with open(GENESIS_FILE, "r") as genesis_file:
-                genesis = genesis_file.read()
-        elif LEDGER_URL:
-            async with ClientSession() as session:
-                async with session.get(LEDGER_URL.rstrip("/") + "/genesis") as resp:
-                    genesis = await resp.text()
-        else:
-            with open("local-genesis.txt", "r") as genesis_file:
-                genesis = genesis_file.read()
+        async with ClientSession() as session:
+            async with session.get(LEDGER_URL.rstrip("/") + "/genesis") as resp:
+                genesis = await resp.text()
     except Exception:
         LOGGER.exception("Error loading genesis transactions:")
     return genesis
@@ -131,7 +127,6 @@ class DemoAgent:
         timing_log: str = None,
         postgres: bool = None,
         revocation: bool = False,
-        multitenant: bool = False,
         mediation: bool = False,
         aip: int = 20,
         arg_file: str = None,
@@ -151,7 +146,7 @@ class DemoAgent:
         self.prefix = prefix
         self.timing = timing
         self.timing_log = timing_log
-        self.postgres = DEFAULT_POSTGRES if postgres is None else postgres
+        self.postgres = True
         self.tails_server_base_url = tails_server_base_url
         self.revocation = revocation
         self.endorser_role = endorser_role
@@ -161,7 +156,6 @@ class DemoAgent:
         self.trace_enabled = TRACE_ENABLED
         self.trace_target = TRACE_TARGET
         self.trace_tag = TRACE_TAG
-        self.multitenant = multitenant
         self.external_webhook_target = WEBHOOK_TARGET
         self.mediation = mediation
         self.mediator_connection_id = None
@@ -171,11 +165,7 @@ class DemoAgent:
 
         self.admin_url = f"http://{self.internal_host}:{admin_port}"
         if AGENT_ENDPOINT:
-            self.endpoint = AGENT_ENDPOINT
-        elif RUN_MODE == "pwd":
-            self.endpoint = f"http://{self.external_host}".replace(
-                "{PORT}", str(http_port)
-            )
+            self.endpoint = f"http://{AGENT_ENDPOINT}:{http_port}"
         else:
             self.endpoint = f"http://{self.external_host}:{http_port}"
 
@@ -197,21 +187,13 @@ class DemoAgent:
             else seed
         )
         self.storage_type = params.get("storage_type")
-        self.wallet_type = params.get("wallet_type") or "askar"
+        self.wallet_type = "askar"
         self.wallet_name = (
             params.get("wallet_name") or self.ident.lower().replace(" ", "") + rand_name
         )
         self.wallet_key = params.get("wallet_key") or self.ident + rand_name
         self.did = None
         self.wallet_stats = []
-
-        # for multitenancy, storage_type and wallet_type are the same for all wallets
-        if self.multitenant:
-            self.agency_ident = self.ident
-            self.agency_wallet_name = self.wallet_name
-            self.agency_wallet_seed = self.seed
-            self.agency_wallet_did = self.did
-            self.agency_wallet_key = self.wallet_key
 
         self.multi_write_ledger_url = None
         if self.genesis_txn_list:
@@ -232,11 +214,6 @@ class DemoAgent:
                     )
             with open(self.genesis_txn_list, "w") as file:
                 documents = yaml.dump(updated_config_list, file)
-
-    async def get_wallets(self):
-        """Get registered wallets of agent (this is an agency call)."""
-        wallets = await self.admin_GET("/multitenancy/wallets")
-        return wallets
 
     def get_new_webhook_port(self):
         """Get new webhook port for registering additional sub-wallets"""
@@ -341,18 +318,9 @@ class DemoAgent:
             "--preserve-exchange-records",
             "--auto-provision",
             "--public-invites",
-            # ("--log-level", "debug"),
         ]
         if self.aip == 20:
             result.append("--emit-new-didcomm-prefix")
-        if self.multitenant:
-            result.extend(
-                [
-                    "--multitenant",
-                    "--multitenant-admin",
-                    ("--jwt-secret", "very_secret_secret"),
-                ]
-            )
         if self.genesis_data:
             result.append(("--genesis-transactions", self.genesis_data))
         if self.genesis_txn_list:
@@ -521,9 +489,6 @@ class DemoAgent:
                 nym_info = await resp.json()
             self.did = nym_info["did"]
             self.log(f"nym_info: {nym_info}")
-            if self.multitenant:
-                if not self.agency_wallet_did:
-                    self.agency_wallet_did = self.did
             self.log(f"Registered DID: {self.did}")
         elif cred_type == CRED_FORMAT_JSON_LD:
             # TODO register a did:key with appropriate signature type
@@ -642,19 +607,6 @@ class DemoAgent:
         self.log(f"Created NEW wallet {target_wallet_name}")
         return True
 
-    async def get_id_and_token(self, wallet_name):
-        wallet = await self.agency_admin_GET(
-            f"/multitenancy/wallets?wallet_name={wallet_name}"
-        )
-        wallet_id = wallet["results"][0]["wallet_id"]
-
-        wallet = await self.agency_admin_POST(
-            f"/multitenancy/wallet/{wallet_id}/token", {}
-        )
-        token = wallet["token"]
-
-        return {"id": wallet_id, "token": token}
-
     def handle_output(self, *output, source: str = None, **kwargs):
         end = "" if source else "\n"
         if source == "stderr":
@@ -663,18 +615,7 @@ class DemoAgent:
             color = self.color or "fg:ansiblue"
         else:
             color = None
-        try:
-            log_msg(*output, color=color, prefix=self.prefix_str, end=end, **kwargs)
-        except AssertionError as e:
-            if self.trace_enabled and self.trace_target == "log":
-                # when tracing to a log file,
-                # we hit an issue with the underlying prompt_toolkit.
-                # it attempts to output what is written by the log and can't find the
-                # correct terminal and throws an error. The trace log record does show
-                # in the terminal, so let's just ignore this error.
-                pass
-            else:
-                raise e
+        log_msg(*output, color=color, prefix=self.prefix_str, end=end, **kwargs)
 
     def log(self, *msg, **kwargs):
         self.handle_output(*msg, **kwargs)
@@ -758,12 +699,9 @@ class DemoAgent:
 
     async def listen_webhooks(self, webhook_port):
         self.webhook_port = webhook_port
-        if RUN_MODE == "pwd":
-            self.webhook_url = f"http://localhost:{str(webhook_port)}/webhooks"
-        else:
-            self.webhook_url = self.external_webhook_target or (
-                f"http://{self.external_host}:{str(webhook_port)}/webhooks"
-            )
+        self.webhook_url = self.external_webhook_target or (
+            f"http://{self.external_host}:{str(webhook_port)}/webhooks"
+        )
         app = web.Application()
         app.add_routes(
             [
@@ -856,10 +794,6 @@ class DemoAgent:
     async def handle_mediation(self, message):
         self.log(f"Received mediation message ...\n")
 
-    async def handle_keylist(self, message):
-        self.log(f"Received handle_keylist message ...\n")
-        self.log(json.dumps(message))
-
     async def taa_accept(self):
         taa_info = await self.admin_GET("/ledger/taa")
         if taa_info["result"]["taa_required"]:
@@ -896,39 +830,11 @@ class DemoAgent:
                     raise Exception(f"Error decoding JSON: {resp_text}") from e
             return resp_text
 
-    async def agency_admin_GET(
-        self, path, text=False, params=None, headers=None
-    ) -> ClientResponse:
-        if not self.multitenant:
-            raise Exception("Error can't call agency admin unless in multitenant mode")
-        try:
-            EVENT_LOGGER.debug("Controller GET %s request to Agent", path)
-            if not headers:
-                headers = {}
-            response = await self.admin_request(
-                "GET", path, None, text, params, headers=headers
-            )
-            EVENT_LOGGER.debug(
-                "Response from GET %s received: \n%s",
-                path,
-                repr_json(response),
-            )
-            return response
-        except ClientError as e:
-            self.log(f"Error during GET {path}: {str(e)}")
-            raise
-
     async def admin_GET(
         self, path, text=False, params=None, headers=None
     ) -> ClientResponse:
         try:
             EVENT_LOGGER.debug("Controller GET %s request to Agent", path)
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             response = await self.admin_request(
                 "GET", path, None, text, params, headers=headers
             )
@@ -940,32 +846,6 @@ class DemoAgent:
             return response
         except ClientError as e:
             self.log(f"Error during GET {path}: {str(e)}")
-            raise
-
-    async def agency_admin_POST(
-        self, path, data=None, text=False, params=None, headers=None
-    ) -> ClientResponse:
-        if not self.multitenant:
-            raise Exception("Error can't call agency admin unless in multitenant mode")
-        try:
-            EVENT_LOGGER.debug(
-                "Controller POST %s request to Agent%s",
-                path,
-                (" with data: \n{}".format(repr_json(data)) if data else ""),
-            )
-            if not headers:
-                headers = {}
-            response = await self.admin_request(
-                "POST", path, data, text, params, headers=headers
-            )
-            EVENT_LOGGER.debug(
-                "Response from POST %s received: \n%s",
-                path,
-                repr_json(response),
-            )
-            return response
-        except ClientError as e:
-            self.log(f"Error during POST {path}: {str(e)}")
             raise
 
     async def admin_POST(
@@ -977,12 +857,6 @@ class DemoAgent:
                 path,
                 (" with data: \n{}".format(repr_json(data)) if data else ""),
             )
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             response = await self.admin_request(
                 "POST", path, data, text, params, headers=headers
             )
@@ -1000,12 +874,6 @@ class DemoAgent:
         self, path, data=None, text=False, params=None, headers=None
     ) -> ClientResponse:
         try:
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             return await self.admin_request(
                 "PATCH", path, data, text, params, headers=headers
             )
@@ -1017,12 +885,6 @@ class DemoAgent:
         self, path, data=None, text=False, params=None, headers=None
     ) -> ClientResponse:
         try:
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             return await self.admin_request(
                 "PUT", path, data, text, params, headers=headers
             )
@@ -1032,12 +894,6 @@ class DemoAgent:
 
     async def admin_GET_FILE(self, path, params=None, headers=None) -> bytes:
         try:
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             params = {k: v for (k, v) in (params or {}).items() if v is not None}
             resp = await self.client_session.request(
                 "GET", self.admin_url + path, params=params, headers=headers
@@ -1050,12 +906,6 @@ class DemoAgent:
 
     async def admin_PUT_FILE(self, files, url, params=None, headers=None) -> bytes:
         try:
-            if self.multitenant:
-                if not headers:
-                    headers = {}
-                headers["Authorization"] = (
-                    "Bearer " + self.managed_wallet_params["token"]
-                )
             params = {k: v for (k, v) in (params or {}).items() if v is not None}
             resp = await self.client_session.request(
                 "PUT", url, params=params, data=files, headers=headers
@@ -1231,8 +1081,6 @@ class DemoAgent:
                 "handshake_protocols": ["rfc23"],
                 "use_public_did": reuse_connections,
             }
-            if self.mediation:
-                payload["mediation_id"] = self.mediator_request_id
             invi_rec = await self.admin_POST(
                 "/out-of-band/create-invitation",
                 payload,
@@ -1243,10 +1091,9 @@ class DemoAgent:
                 invi_params = {
                     "auto_accept": json.dumps(auto_accept),
                 }
-                payload = {"mediation_id": self.mediator_request_id}
                 invi_rec = await self.admin_POST(
                     "/connections/create-invitation",
-                    payload,
+                    {"mediation_id": self.mediator_request_id},
                     params=invi_params,
                 )
             else:
@@ -1259,8 +1106,6 @@ class DemoAgent:
             params = {"alias": "endorser"}
         else:
             params = {}
-        if self.mediation:
-            params["mediation_id"] = self.mediator_request_id
         if "/out-of-band/" in invite.get("@type", ""):
             # always reuse connections if possible
             params["use_existing_connection"] = "true"
@@ -1358,12 +1203,12 @@ async def connect_wallet_to_mediator(agent, mediator_agent):
     log_msg("Connected agent to mediator:", agent.ident, mediator_agent.ident)
 
     # setup mediation on our connection
-    log_msg(f"Request mediation on connection {agent.mediator_connection_id} ...")
+    log_msg("Request mediation ...")
     mediation_request = await agent.admin_POST(
         "/mediation/request/" + agent.mediator_connection_id, {}
     )
     agent.mediator_request_id = mediation_request["mediation_id"]
-    log_msg(f"Mediation request id: {agent.mediator_request_id}")
+    log_msg("Mediation request id:", agent.mediator_request_id)
 
     count = 3
     while 0 < count:

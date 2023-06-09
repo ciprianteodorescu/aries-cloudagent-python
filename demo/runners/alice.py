@@ -9,12 +9,12 @@ from urllib.parse import urlparse
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runners.agent_container import (  # noqa:E402
+from agent_container import (  # noqa:E402
     arg_parser,
     create_agent_with_args,
     AriesAgent,
 )
-from runners.support.utils import (  # noqa:E402
+from support.utils import (  # noqa:E402
     check_requires,
     log_msg,
     log_status,
@@ -61,10 +61,11 @@ class AliceAgent(AriesAgent):
     def connection_ready(self):
         return self._connection_ready.done() and self._connection_ready.result()
 
-
+# TODO: go back to reading from terminal
 async def input_invitation(agent_container):
     agent_container.agent._connection_ready = asyncio.Future()
-    async for details in prompt_loop("Invite details: "):
+    details = '{"@type": "https://didcomm.org/out-of-band/1.1/invitation", "@id": "63cb2a49-e139-4914-a24c-e09f13602d1c", "handshake_protocols": ["https://didcomm.org/didexchange/1.0"], "label": "faber.agent", "services": [{"id": "#inline", "type": "did-communication", "recipientKeys": ["did:key:z6MknTRHJb6cQUCnNDSkn1Q88JuJzpQ4dy3YRmDcRJxcEjcM"], "serviceEndpoint": "http://192.168.1.105:8020"}]}'
+    if details:
         b64_invite = None
         try:
             url = urlparse(details)
@@ -95,7 +96,7 @@ async def input_invitation(agent_container):
         if details:
             try:
                 details = json.loads(details)
-                break
+                # TODO: uncomment this # break
             except json.JSONDecodeError as e:
                 log_msg("Invalid invitation:", str(e))
 
@@ -120,12 +121,10 @@ async def main(args):
             alice_agent.start_port,
             alice_agent.start_port + 1,
             genesis_data=alice_agent.genesis_txns,
-            genesis_txn_list=alice_agent.genesis_txn_list,
             no_auto=alice_agent.no_auto,
             tails_server_base_url=alice_agent.tails_server_base_url,
             revocation=alice_agent.revocation,
             timing=alice_agent.show_timing,
-            multitenant=alice_agent.multitenant,
             mediation=alice_agent.mediation,
             wallet_type=alice_agent.wallet_type,
             aip=alice_agent.aip,
@@ -137,46 +136,16 @@ async def main(args):
         log_status("#9 Input faber.py invitation details")
         await input_invitation(alice_agent)
 
-        options = "    (3) Send Message\n" "    (4) Input New Invitation\n"
+        options = "    (3) Send Message\n" + "    (4) Input New Invitation\n" + "   (5) Interogate postgres"
         if alice_agent.endorser_role and alice_agent.endorser_role == "author":
             options += "    (D) Set Endorser's DID\n"
-        if alice_agent.multitenant:
-            options += "    (W) Create and/or Enable Wallet\n"
-        options += "    (X) Exit?\n[3/4/{}X] ".format(
-            "W/" if alice_agent.multitenant else "",
-        )
+        options += "    (X) Exit?\n[3/4/X] "
         async for option in prompt_loop(options):
             if option is not None:
                 option = option.strip()
 
             if option is None or option in "xX":
                 break
-
-            elif option in "dD" and alice_agent.endorser_role:
-                endorser_did = await prompt("Enter Endorser's DID: ")
-                await alice_agent.agent.admin_POST(
-                    f"/transactions/{alice_agent.agent.connection_id}/set-endorser-info",
-                    params={"endorser_did": endorser_did, "endorser_name": "endorser"},
-                )
-
-            elif option in "wW" and alice_agent.multitenant:
-                target_wallet_name = await prompt("Enter wallet name: ")
-                include_subwallet_webhook = await prompt(
-                    "(Y/N) Create sub-wallet webhook target: "
-                )
-                if include_subwallet_webhook.lower() == "y":
-                    await alice_agent.agent.register_or_switch_wallet(
-                        target_wallet_name,
-                        webhook_port=alice_agent.agent.get_new_webhook_port(),
-                        mediator_agent=alice_agent.mediator_agent,
-                        taa_accept=alice_agent.taa_accept,
-                    )
-                else:
-                    await alice_agent.agent.register_or_switch_wallet(
-                        target_wallet_name,
-                        mediator_agent=alice_agent.mediator_agent,
-                        taa_accept=alice_agent.taa_accept,
-                    )
 
             elif option == "3":
                 msg = await prompt("Enter message: ")
@@ -190,6 +159,10 @@ async def main(args):
                 # handle new invitation
                 log_status("Input new invitation details")
                 await input_invitation(alice_agent)
+
+            elif option == "5":
+                await alice_agent.agent.print_postgres_content()
+                log_status("file written")
 
         if alice_agent.show_timing:
             timing = await alice_agent.agent.fetch_timing()

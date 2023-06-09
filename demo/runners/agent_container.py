@@ -246,19 +246,9 @@ class AriesAgent(DemoAgent):
 
         elif state == "offer-received":
             log_status("#15 After receiving credential offer, send credential request")
-            if message["by_format"]["cred_offer"].get("indy"):
-                await self.admin_POST(
-                    f"/issue-credential-2.0/records/{cred_ex_id}/send-request"
-                )
-            elif message["by_format"]["cred_offer"].get("ld_proof"):
-                holder_did = await self.admin_POST(
-                    "/wallet/did/create",
-                    {"method": "key", "options": {"key_type": "bls12381g2"}},
-                )
-                data = {"holder_did": holder_did["result"]["did"]}
-                await self.admin_POST(
-                    f"/issue-credential-2.0/records/{cred_ex_id}/send-request", data
-                )
+            await self.admin_POST(
+                f"/issue-credential-2.0/records/{cred_ex_id}/send-request"
+            )
 
         elif state == "done":
             pass
@@ -394,11 +384,12 @@ class AriesAgent(DemoAgent):
             log_status(
                 "#24 Query for credentials in the wallet that satisfy the proof request"
             )
+            # TODO: why doesn't the message contain the full proof by default??
+            message = await self.admin_GET(f"/present-proof-2.0/records/{pres_ex_id}")
             pres_request_indy = message["by_format"].get("pres_request", {}).get("indy")
-            pres_request_dif = message["by_format"].get("pres_request", {}).get("dif")
             request = {}
 
-            if not pres_request_dif and not pres_request_indy:
+            if not pres_request_indy:
                 raise Exception("Invalid presentation request received")
 
             if pres_request_indy:
@@ -463,74 +454,6 @@ class AriesAgent(DemoAgent):
                 except ClientError:
                     pass
 
-            if pres_request_dif:
-                try:
-                    # select credentials to provide for the proof
-                    creds = await self.admin_GET(
-                        f"/present-proof-2.0/records/{pres_ex_id}/credentials"
-                    )
-                    if creds and 0 < len(creds):
-                        # select only dif credentials
-                        creds = [x for x in creds if "issuanceDate" in x]
-                        creds = sorted(
-                            creds,
-                            key=lambda c: c["issuanceDate"],
-                            reverse=True,
-                        )
-                        records = creds
-                    else:
-                        records = []
-
-                    log_status("#25 Generate the dif proof")
-                    dif_request = {
-                        "dif": {},
-                    }
-                    # specify the record id for each input_descriptor id:
-                    dif_request["dif"]["record_ids"] = {}
-                    for input_descriptor in pres_request_dif["presentation_definition"][
-                        "input_descriptors"
-                    ]:
-                        input_descriptor_schema_uri = []
-                        for element in input_descriptor["schema"]:
-                            input_descriptor_schema_uri.append(element["uri"])
-
-                        for record in records:
-                            if self.check_input_descriptor_record_id(
-                                input_descriptor_schema_uri, record
-                            ):
-                                record_id = record["record_id"]
-                                dif_request["dif"]["record_ids"][
-                                    input_descriptor["id"]
-                                ] = [
-                                    record_id,
-                                ]
-                                break
-                    log_msg("presenting ld-presentation:", dif_request)
-                    request.update(dif_request)
-
-                    # NOTE that the holder/prover can also/or specify constraints by including the whole proof request
-                    # and constraining the presented credentials by adding filters, for example:
-                    #
-                    # request = {
-                    #     "dif": pres_request_dif,
-                    # }
-                    # request["dif"]["presentation_definition"]["input_descriptors"]["constraints"]["fields"].append(
-                    #      {
-                    #          "path": [
-                    #              "$.id"
-                    #          ],
-                    #          "purpose": "Specify the id of the credential to present",
-                    #          "filter": {
-                    #              "const": "https://credential.example.com/residents/1234567890"
-                    #          }
-                    #      }
-                    # )
-                    #
-                    # (NOTE the above assumes the credential contains an "id", which is an optional field)
-
-                except ClientError:
-                    pass
-
             log_status("#26 Send the proof to X: " + json.dumps(request))
             await self.admin_POST(
                 f"/present-proof-2.0/records/{pres_ex_id}/send-presentation",
@@ -552,6 +475,11 @@ class AriesAgent(DemoAgent):
             self.log("Problem report message:", message.get("error_msg"))
 
     async def handle_basicmessages(self, message):
+        print(message)
+
+        if "received your message" not in message["content"] and "role" not in message.keys():
+            await self.admin_POST(f"/connections/{message['connection_id']}/store-message", data=message)
+
         self.log("Received message:", message["content"])
 
     async def handle_endorse_transaction(self, message):
@@ -657,11 +585,9 @@ class AgentContainer:
         no_auto: bool = False,
         revocation: bool = False,
         genesis_txns: str = None,
-        genesis_txn_list: str = None,
         tails_server_base_url: str = None,
         cred_type: str = CRED_FORMAT_INDY,
         show_timing: bool = False,
-        multitenant: bool = False,
         mediation: bool = False,
         use_did_exchange: bool = False,
         wallet_type: str = None,
@@ -675,7 +601,6 @@ class AgentContainer:
     ):
         # configuration parameters
         self.genesis_txns = genesis_txns
-        self.genesis_txn_list = genesis_txn_list
         self.ident = ident
         self.start_port = start_port
         self.prefix = prefix or ident
@@ -684,7 +609,6 @@ class AgentContainer:
         self.tails_server_base_url = tails_server_base_url
         self.cred_type = cred_type
         self.show_timing = show_timing
-        self.multitenant = multitenant
         self.mediation = mediation
         self.use_did_exchange = use_did_exchange
         self.wallet_type = wallet_type
@@ -733,7 +657,6 @@ class AgentContainer:
                 tails_server_base_url=self.tails_server_base_url,
                 timing=self.show_timing,
                 revocation=self.revocation,
-                multitenant=self.multitenant,
                 mediation=self.mediation,
                 wallet_type=self.wallet_type,
                 seed=self.seed,
@@ -787,32 +710,19 @@ class AgentContainer:
         else:
             self.mediator_agent = None
 
-        if self.multitenant:
-            # create an initial managed sub-wallet (also mediated)
-            rand_name = str(random.randint(100_000, 999_999))
-            await self.agent.register_or_switch_wallet(
-                self.ident + ".initial." + rand_name,
-                public_did=self.public_did
-                and ((not self.endorser_role) or (not self.endorser_role == "author")),
-                webhook_port=None,
-                mediator_agent=self.mediator_agent,
-                endorser_agent=self.endorser_agent,
-                taa_accept=self.taa_accept,
-            )
-        else:
-            if self.mediation:
-                # we need to pre-connect the agent to its mediator
-                self.agent.log("Connect wallet to mediator ...")
-                if not await connect_wallet_to_mediator(
-                    self.agent, self.mediator_agent
-                ):
-                    raise Exception("Mediation setup FAILED :-(")
-            if self.endorser_agent:
-                self.agent.log("Connect wallet to endorser ...")
-                if not await connect_wallet_to_endorser(
-                    self.agent, self.endorser_agent
-                ):
-                    raise Exception("Endorser setup FAILED :-(")
+        if self.mediation:
+            # we need to pre-connect the agent to its mediator
+            self.agent.log("Connect wallet to mediator ...")
+            if not await connect_wallet_to_mediator(
+                self.agent, self.mediator_agent
+            ):
+                raise Exception("Mediation setup FAILED :-(")
+        if self.endorser_agent:
+            self.agent.log("Connect wallet to endorser ...")
+            if not await connect_wallet_to_endorser(
+                self.agent, self.endorser_agent
+            ):
+                raise Exception("Endorser setup FAILED :-(")
         if self.taa_accept:
             await self.agent.taa_accept()
 
@@ -1121,30 +1031,6 @@ class AgentContainer:
         """
         return await self.agent.admin_PUT(path, data=data, text=text, params=params)
 
-    async def agency_admin_GET(self, path, text=False, params=None) -> dict:
-        """
-        Execute an agency GET request in the context of the base wallet (multitenant only).
-
-        path = /path/of/request
-        text = True if the expected response is text, False if json data
-        params = any additional parameters to pass with the request
-        """
-        return await self.agent.agency_admin_GET(path, text=text, params=params)
-
-    async def agency_admin_POST(self, path, data=None, text=False, params=None) -> dict:
-        """
-        Execute an agency POST request in the context of the base wallet (multitenant only).
-
-        path = /path/of/request
-        data = payload to post with the request
-        text = True if the expected response is text, False if json data
-        params = any additional parameters to pass with the request
-        """
-        return await self.agent.agency_admin_POST(
-            path, data=data, text=text, params=params
-        )
-
-
 def arg_parser(ident: str = None, port: int = 8020):
     """
     Standard command-line arguements.
@@ -1213,18 +1099,7 @@ def arg_parser(ident: str = None, port: int = 8020):
         "--timing", action="store_true", help="Enable timing information"
     )
     parser.add_argument(
-        "--multitenant", action="store_true", help="Enable multitenancy options"
-    )
-    parser.add_argument(
         "--mediation", action="store_true", help="Enable mediation functionality"
-    )
-    parser.add_argument(
-        "--multi-ledger",
-        action="store_true",
-        help=(
-            "Enable multiple ledger mode, config file can be found "
-            "here: ./demo/multi_ledger_config.yml"
-        ),
     )
     parser.add_argument(
         "--wallet-type",
@@ -1310,13 +1185,8 @@ async def create_agent_with_args(args, ident: str = None):
             "If revocation is enabled, --tails-server-base-url must be provided"
         )
 
-    multi_ledger_config_path = None
-    genesis = None
-    if "multi_ledger" in args and args.multi_ledger:
-        multi_ledger_config_path = "./demo/multi_ledger_config.yml"
-    else:
-        genesis = await default_genesis_txns()
-    if not genesis and not multi_ledger_config_path:
+    genesis = await default_genesis_txns()
+    if not genesis:
         print("Error retrieving ledger genesis transactions")
         sys.exit(1)
 
@@ -1340,7 +1210,7 @@ async def create_agent_with_args(args, ident: str = None):
     else:
         public_did = args.public_did if "public_did" in args else None
 
-    cred_type = args.cred_type if "cred_type" in args else None
+    cred_type = args.cred_type if "cred_type" in args else CRED_FORMAT_INDY
     log_msg(
         f"Initializing demo agent {agent_ident} with AIP {aip} and credential type {cred_type}"
     )
@@ -1351,14 +1221,12 @@ async def create_agent_with_args(args, ident: str = None):
 
     agent = AgentContainer(
         genesis_txns=genesis,
-        genesis_txn_list=multi_ledger_config_path,
         ident=agent_ident + ".agent",
         start_port=args.port,
         no_auto=args.no_auto,
         revocation=args.revocation if "revocation" in args else False,
         tails_server_base_url=tails_server_base_url,
         show_timing=args.timing,
-        multitenant=args.multitenant,
         mediation=args.mediation,
         cred_type=cred_type,
         use_did_exchange=(aip == 20) if ("aip" in args) else args.did_exchange,
@@ -1373,115 +1241,6 @@ async def create_agent_with_args(args, ident: str = None):
     )
 
     return agent
-
-
-async def test_main(
-    start_port: int,
-    no_auto: bool = False,
-    revocation: bool = False,
-    tails_server_base_url: str = None,
-    show_timing: bool = False,
-    multitenant: bool = False,
-    mediation: bool = False,
-    use_did_exchange: bool = False,
-    wallet_type: str = None,
-    cred_type: str = None,
-    aip: str = 20,
-):
-    """Test to startup a couple of agents."""
-
-    faber_container = None
-    alice_container = None
-    try:
-        # initialize the containers
-        faber_container = AgentContainer(
-            genesis_txns=genesis,
-            ident="Faber.agent",
-            start_port=start_port,
-            no_auto=no_auto,
-            revocation=revocation,
-            tails_server_base_url=tails_server_base_url,
-            show_timing=show_timing,
-            multitenant=multitenant,
-            mediation=mediation,
-            use_did_exchange=use_did_exchange,
-            wallet_type=wallet_type,
-            public_did=True,
-            seed="random",
-            cred_type=cred_type,
-            aip=aip,
-        )
-        alice_container = AgentContainer(
-            genesis_txns=genesis,
-            ident="Alice.agent",
-            start_port=start_port + 10,
-            no_auto=no_auto,
-            revocation=False,
-            show_timing=show_timing,
-            multitenant=multitenant,
-            mediation=mediation,
-            use_did_exchange=use_did_exchange,
-            wallet_type=wallet_type,
-            public_did=False,
-            seed=None,
-            aip=aip,
-        )
-
-        # start the agents - faber gets a public DID and schema/cred def
-        await faber_container.initialize(
-            schema_name="degree schema",
-            schema_attrs=[
-                "name",
-                "date",
-                "degree",
-                "grade",
-            ],
-        )
-        await alice_container.initialize()
-
-        # faber create invitation
-        invite = await faber_container.generate_invitation()
-
-        # alice accept invitation
-        invite_details = invite["invitation"]
-        connection = await alice_container.input_invitation(invite_details)
-
-        # wait for faber connection to activate
-        await faber_container.detect_connection()
-        await alice_container.detect_connection()
-
-        # TODO faber issue credential to alice
-        # TODO alice check for received credential
-
-        log_msg("Sleeping ...")
-        await asyncio.sleep(3.0)
-
-    except Exception as e:
-        LOGGER.exception("Error initializing agent:", e)
-        raise (e)
-
-    finally:
-        terminated = True
-        try:
-            # shut down containers at the end of the test
-            if alice_container:
-                log_msg("Shutting down alice agent ...")
-                await alice_container.terminate()
-            if faber_container:
-                log_msg("Shutting down faber agent ...")
-                await faber_container.terminate()
-        except Exception as e:
-            LOGGER.exception("Error terminating agent:", e)
-            terminated = False
-
-    await asyncio.sleep(0.1)
-
-    if not terminated:
-        os._exit(1)
-
-    await asyncio.sleep(2.0)
-    os._exit(1)
-
 
 if __name__ == "__main__":
     parser = arg_parser()
@@ -1528,22 +1287,3 @@ if __name__ == "__main__":
         raise Exception(
             "If revocation is enabled, --tails-server-base-url must be provided"
         )
-
-    try:
-        asyncio.get_event_loop().run_until_complete(
-            test_main(
-                args.port,
-                args.no_auto,
-                args.revocation,
-                tails_server_base_url,
-                args.timing,
-                args.multitenant,
-                args.mediation,
-                args.did_exchange,
-                args.wallet_type,
-                args.cred_type,
-                args.aip,
-            )
-        )
-    except KeyboardInterrupt:
-        os._exit(1)
