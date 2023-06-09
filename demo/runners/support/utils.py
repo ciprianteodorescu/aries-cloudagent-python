@@ -113,12 +113,7 @@ def output_reader(handle, callback, *args, **kwargs):
     for line in iter(handle.readline, b""):
         if not line:
             break
-        try:
-            run_in_terminal(functools.partial(callback, line, *args))
-        except AssertionError as e:
-            # see comment in DemoAgent.handle_output
-            # trace log and prompt_toolkit do not get along...
-            pass
+        run_in_terminal(functools.partial(callback, line, *args))
 
 
 def log_msg(*msg, color="fg:ansimagenta", **kwargs):
