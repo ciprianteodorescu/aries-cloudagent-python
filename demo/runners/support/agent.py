@@ -42,27 +42,26 @@ TRACE_ENABLED = os.getenv("TRACE_ENABLED")
 
 WEBHOOK_TARGET = os.getenv("WEBHOOK_TARGET")
 
-AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
-if AGENT_ENDPOINT is None:
-    if os.popen("uname").read().strip() == "Darwin":
-        # determine if we need to go back to find the script
-        wd = os.popen("pwd").read().strip().split("/")
-        proj_i = 0
-        for i in range(len(wd)):
-            if wd[i] == IP_SCRIPT_DIR:
-                proj_i = i
-                break
-        back = len(wd) - proj_i - 1
+AGENT_ENDPOINT = None
+if os.popen("uname").read().strip() == "Darwin":
+    # determine if we need to go back to find the script
+    wd = os.popen("pwd").read().strip().split("/")
+    proj_i = 0
+    for i in range(len(wd)):
+        if wd[i] == IP_SCRIPT_DIR:
+            proj_i = i
+            break
+    back = len(wd) - proj_i - 1
 
-        # run the script
-        if back == 0:
-            AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
-        else:
-            command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
-            AGENT_ENDPOINT = os.popen(command).read().strip()
+    # run the script
+    if back == 0:
+        AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
+    else:
+        command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
+        AGENT_ENDPOINT = os.popen(command).read().strip()
 
-    elif os.popen("uname").read().strip() == "Linux":
-        AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
+elif os.popen("uname").read().strip() == "Linux":
+    AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
 
 DEFAULT_POSTGRES = bool(os.getenv("POSTGRES"))
 DEFAULT_INTERNAL_HOST = "127.0.0.1"
@@ -165,10 +164,10 @@ class DemoAgent:
         self.arg_file = arg_file
 
         self.admin_url = f"http://{self.internal_host}:{admin_port}"
-        if AGENT_ENDPOINT:
-            self.endpoint = f"http://{AGENT_ENDPOINT}:{http_port}"
-        else:
+        if self.external_host:
             self.endpoint = f"http://{self.external_host}:{http_port}"
+        elif AGENT_ENDPOINT:
+            self.endpoint = f"http://{AGENT_ENDPOINT}:{http_port}"
 
         self.webhook_port = None
         self.webhook_url = None

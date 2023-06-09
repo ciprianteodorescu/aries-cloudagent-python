@@ -44,6 +44,7 @@ class FaberAgent(AriesAgent):
             no_auto: bool = False,
             endorser_role: str = None,
             revocation: bool = False,
+            external_host: str = None,
             **kwargs,
     ):
         super().__init__(
@@ -54,6 +55,7 @@ class FaberAgent(AriesAgent):
             no_auto=no_auto,
             endorser_role=endorser_role,
             revocation=revocation,
+            external_host=external_host,
             **kwargs,
         )
         self.connection_id = None
@@ -463,7 +465,7 @@ def runFaberAgentSeparately():
         os._exit(1)
 
 
-async def runFaberAgentForWebApp():
+async def runFaberAgentForWebApp(ip):
     parser = arg_parser(ident="faber", port=8020)
     args = parser.parse_args()
     faber_agent = await create_agent_with_args(args, ident="faber")
@@ -491,6 +493,7 @@ async def runFaberAgentForWebApp():
             seed=faber_agent.seed,
             aip=faber_agent.aip,
             endorser_role=faber_agent.endorser_role,
+            external_host=ip,
         )
 
         faber_schema_name = "degree schema"

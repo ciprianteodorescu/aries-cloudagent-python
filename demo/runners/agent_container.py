@@ -55,6 +55,7 @@ class AriesAgent(DemoAgent):
         aip: int = 20,
         endorser_role: str = None,
         revocation: bool = False,
+        external_host: str = None,
         **kwargs,
     ):
         super().__init__(
@@ -75,6 +76,7 @@ class AriesAgent(DemoAgent):
                     "--auto-store-credential",
                 ]
             ),
+            external_host=external_host,
             **kwargs,
         )
         self.connection_id = None
