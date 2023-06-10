@@ -479,8 +479,7 @@ class AriesAgent(DemoAgent):
         print(message)
 
         if "received your message" not in message["content"] and \
-                (("role" in message.keys() and message["role"] == "received") or
-                 ("state" in message.keys() and message["state"] == "received")):
+                "state" in message.keys() and message["state"] == "received":
             await self.admin_POST(f"/connections/{message['connection_id']}/store-message", data=message)
             self.log("Stored message:", message["content"])
         else:
