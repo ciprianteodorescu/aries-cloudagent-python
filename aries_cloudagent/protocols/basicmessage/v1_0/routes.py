@@ -106,10 +106,11 @@ async def store_basic_message(request: web.BaseRequest):
         async with context.profile.session() as session:
             msg = BasicMessage(content=params["content"])
             role = params["state"] if "state" in params.keys() else ""
+            sent_time = params["sent_time"] if "sent_time" in params.keys() else util.datetime_to_str(util.datetime_now())
             # Create basic message record
             record = BasicMessageRecord(
                 connection_id=connection_id,
-                sent_time=util.datetime_to_str(util.datetime_now()),
+                sent_time=sent_time,
                 role=role,
                 content=msg.content
             )
