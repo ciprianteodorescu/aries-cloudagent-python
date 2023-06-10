@@ -74,8 +74,7 @@ async def connection_fetch_basic_messages(request: web.BaseRequest):
     connection_id = request.match_info["conn_id"]
     # params = await request.json()
 
-    tag_filter = {}
-    tag_filter["connection_id"] = connection_id
+    tag_filter = {"connection_id": connection_id}
 
     try:
         async with context.profile.session() as session:
