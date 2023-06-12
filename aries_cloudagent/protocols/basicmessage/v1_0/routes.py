@@ -36,6 +36,22 @@ class BasicConnIdMatchInfoSchema(OpenAPISchema):
     )
 
 
+class BasicConnIdDeleteMatchInfoSchema(OpenAPISchema):
+    """Path parameters and validators for request taking connection id, basic message id and delete all."""
+
+    conn_id = fields.Str(
+        description="Connection identifier", required=True, example=UUIDFour.EXAMPLE
+    )
+
+    basic_msg_id = fields.Str(
+        description="Basic message identifier", required=False, example=UUIDFour.EXAMPLE
+    )
+
+    delete_all = fields.Str(
+        description="Delete all messages", required=False, example=True
+    )
+
+
 class BasicMessageListSchema(OpenAPISchema):
     """Response schema for fetching all basic messages"""
 
@@ -80,7 +96,6 @@ async def connection_fetch_basic_messages(request: web.BaseRequest):
         async with context.profile.session() as session:
             records = await BasicMessageRecord.query(session, tag_filter=tag_filter)
         results = [record.serialize() for record in records]
-        # results.sort(key=)
     except StorageNotFoundError as err:
         raise web.HTTPNotFound(reason=err.roll_up) from err
 
@@ -119,6 +134,47 @@ async def store_basic_message(request: web.BaseRequest):
         raise web.HTTPNotFound(reason=err.roll_up) from err
 
     return web.json_response({})
+
+
+@docs(tags=[DOCS_TAG], summary="Fetch all basic messages sent/received to/from connection")
+@match_info_schema(BasicConnIdDeleteMatchInfoSchema())
+@response_schema(BasicMessageModuleResponseSchema(), 200, description="")
+async def connection_delete_basic_message(request: web.BaseRequest):
+    """
+        Request handler for deleting one or all stored basic message.
+
+        Args:
+            request: aiohttp request object
+        """
+    context: AdminRequestContext = request["context"]
+    connection_id = request.match_info["conn_id"]
+    params = await request.json()
+
+    basic_msg_id = params["basic_msg_id"] if "basic_msg_id" in params.keys() else None
+    delete_all = params["delete_all"] if "delete_all" in params.keys() else False
+
+    if basic_msg_id is None and delete_all is False:
+        # either basic_msg_id should be provided or delete_all be True
+        # otherwise,
+        return web.HTTPUnprocessableEntity(reason="either basic_msg_id must be provided, or delete_all must be True")
+    else:
+        try:
+            async with context.profile.session() as session:
+                if delete_all:
+                    tag_filter = {"connection_id": connection_id}
+                    records = await BasicMessageRecord.query(session, tag_filter=tag_filter)
+                elif basic_msg_id is not None:
+                    tag_filter = {
+                        "connection_id": connection_id,
+                        "basic_message_id": basic_msg_id
+                    }
+                    records = await BasicMessageRecord.query(session, tag_filter=tag_filter)
+                for record in records:
+                    await record.delete_record(session)
+
+
+        except StorageNotFoundError as err:
+            raise web.HTTPNotFound(reason=err.roll_up) from err
 
 
 @docs(tags=[DOCS_TAG], summary="Send a basic message to a connection")
@@ -166,7 +222,8 @@ async def register(app: web.Application):
         [
             web.post("/connections/{conn_id}/send-message", connections_send_message),
             web.get("/connections/{conn_id}/basic-messages", connection_fetch_basic_messages, allow_head=False),
-            web.post("/connections/{conn_id}/store-message", store_basic_message)
+            web.post("/connections/{conn_id}/store-message", store_basic_message),
+            web.post("/connections/{conn_id}/delete-messages", connection_delete_basic_message),
         ]
     )
 

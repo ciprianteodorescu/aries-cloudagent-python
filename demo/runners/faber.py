@@ -469,6 +469,7 @@ async def runFaberAgentForWebApp(ip):
     parser = arg_parser(ident="faber", port=8020)
     args = parser.parse_args()
     faber_agent = await create_agent_with_args(args, ident="faber")
+    faber_agent.seed = "32100000000032100000003210000000"
 
     try:
         log_status(
@@ -480,7 +481,7 @@ async def runFaberAgentForWebApp(ip):
             )
         )
         agent = FaberAgent(
-            "faber.agent",
+            "faber.agent2",
             faber_agent.start_port,
             faber_agent.start_port + 1,
             genesis_data=faber_agent.genesis_txns,
@@ -517,10 +518,21 @@ async def runFaberAgentForWebApp(ip):
         else:
             raise Exception("Invalid credential type:" + faber_agent.cred_type)
 
+        # detect previous connection
+        await check_existent_connection(faber_agent)
+
         print("initialized faber agent")
         return faber_agent
     except:
         terminated = await faber_agent.terminate()
+
+
+async def check_existent_connection(agent_container):
+    connections = await agent_container.agent.admin_GET(f"/connections")
+    if len(connections["results"]) > 0 and "connection_id" in connections["results"][0].keys():
+        agent_container.agent.connection_id = connections["results"][0]["connection_id"]
+    print(connections)
+
 
 if __name__ == "__main__":
     runFaberAgentSeparately()

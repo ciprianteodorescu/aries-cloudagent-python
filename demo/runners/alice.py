@@ -64,7 +64,7 @@ class AliceAgent(AriesAgent):
 # TODO: go back to reading from terminal
 async def input_invitation(agent_container):
     agent_container.agent._connection_ready = asyncio.Future()
-    details = '{"@type": "https://didcomm.org/out-of-band/1.1/invitation", "@id": "6e8de374-9f90-406c-a008-350f3981078b", "services": [{"id": "#inline", "type": "did-communication", "recipientKeys": ["did:key:z6MknBBTxZ9DQmbH55NipLMHyF9g2rXNF4hZDMt9ketG4bTA"], "serviceEndpoint": "http://192.168.1.101:8020"}], "label": "faber.agent", "handshake_protocols": ["https://didcomm.org/didexchange/1.0"]}'
+    details = '{"@type": "https://didcomm.org/out-of-band/1.1/invitation", "@id": "0d58b8f1-bfdc-4425-aa51-a40422431673", "handshake_protocols": ["https://didcomm.org/didexchange/1.0"], "label": "faber.agent2", "services": [{"id": "#inline", "type": "did-communication", "recipientKeys": ["did:key:z6MksDuCf3rEPCYanqND8LRTXyLfNEVtHDmavHPaxBV5wPJ4"], "serviceEndpoint": "http://192.168.1.101:8020"}]}'
     if details:
         b64_invite = None
         try:
@@ -104,6 +104,15 @@ async def input_invitation(agent_container):
         connection = await agent_container.input_invitation(details, wait=True)
 
 
+async def check_existent_connection(agent_container):
+    try:
+        connections = await agent_container.agent.admin_GET(f"/connections")
+        agent_container.agent.connection_id = connections["results"][0]["connection_id"]
+        return True
+    except:
+        return False
+
+
 async def main(args):
     alice_agent = await create_agent_with_args(args, ident="alice")
 
@@ -117,7 +126,7 @@ async def main(args):
             )
         )
         agent = AliceAgent(
-            "alice.agent",
+            "alice.agent2",
             alice_agent.start_port,
             alice_agent.start_port + 1,
             genesis_data=alice_agent.genesis_txns,
@@ -134,7 +143,9 @@ async def main(args):
         await alice_agent.initialize(the_agent=agent)
 
         log_status("#9 Input faber.py invitation details")
-        await input_invitation(alice_agent)
+        is_already_connected = await check_existent_connection(alice_agent)
+        if not is_already_connected:
+            await input_invitation(alice_agent)
 
         options = "    (3) Send Message\n" + "    (4) Input New Invitation\n" + "   (5) Interogate postgres"
         if alice_agent.endorser_role and alice_agent.endorser_role == "author":
