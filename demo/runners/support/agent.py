@@ -922,7 +922,7 @@ class DemoAgent:
             code = None
             text = None
             start = default_timer()
-            async with ClientSession(timeout=ClientTimeout(total=3.0)) as session:
+            async with ClientSession(timeout=ClientTimeout(total=10.0)) as session:
                 while default_timer() - start < timeout:
                     try:
                         async with session.get(url, headers=headers) as resp:
