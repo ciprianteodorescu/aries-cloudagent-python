@@ -6,15 +6,18 @@ import logging
 import os
 import sys
 from urllib.parse import urlparse
+import requests
+import socket
+import re
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_container import (  # noqa:E402
+from runners.agent_container import (  # noqa:E402
     arg_parser,
     create_agent_with_args,
     AriesAgent,
 )
-from support.utils import (  # noqa:E402
+from runners.support.utils import (  # noqa:E402
     check_requires,
     log_msg,
     log_status,
@@ -26,17 +29,25 @@ from support.utils import (  # noqa:E402
 logging.basicConfig(level=logging.WARNING)
 LOGGER = logging.getLogger(__name__)
 
+LOCAL_SERVER_ADDRESS = os.getenv('LOCAL_SERVER_ADDRESS', '')
+LOCAL_SERVER_HOSTNAME = os.getenv('LOCAL_SERVER_HOSTNAME', 'MacBook-Pro-6.local')
+LOCAL_SERVER_PORT = os.getenv('LOCAL_SERVER_PORT', '5040')
+
+AGENT_NAME = os.getenv('AGENT_NAME', 'alice.agent4')
+USERNAME = os.getenv('USERNAME', 'cip')
+
 
 class AliceAgent(AriesAgent):
     def __init__(
-        self,
-        ident: str,
-        http_port: int,
-        admin_port: int,
-        no_auto: bool = False,
-        aip: int = 20,
-        endorser_role: str = None,
-        **kwargs,
+            self,
+            ident: str,
+            http_port: int,
+            admin_port: int,
+            no_auto: bool = False,
+            aip: int = 20,
+            endorser_role: str = None,
+            external_host: str = None,
+            **kwargs,
     ):
         super().__init__(
             ident,
@@ -47,6 +58,7 @@ class AliceAgent(AriesAgent):
             seed=None,
             aip=aip,
             endorser_role=endorser_role,
+            external_host=external_host,
             **kwargs,
         )
         self.connection_id = None
@@ -61,10 +73,14 @@ class AliceAgent(AriesAgent):
     def connection_ready(self):
         return self._connection_ready.done() and self._connection_ready.result()
 
+
 # TODO: go back to reading from terminal
-async def input_invitation(agent_container):
+async def connect_local(agent_container):
     agent_container.agent._connection_ready = asyncio.Future()
-    details = '{"@type": "https://didcomm.org/out-of-band/1.1/invitation", "@id": "0d58b8f1-bfdc-4425-aa51-a40422431673", "handshake_protocols": ["https://didcomm.org/didexchange/1.0"], "label": "faber.agent2", "services": [{"id": "#inline", "type": "did-communication", "recipientKeys": ["did:key:z6MksDuCf3rEPCYanqND8LRTXyLfNEVtHDmavHPaxBV5wPJ4"], "serviceEndpoint": "http://192.168.1.101:8020"}]}'
+    local_server_ip = get_local_server_address()
+    details = json.dumps(
+        requests.get(f"http://{local_server_ip}:{LOCAL_SERVER_PORT}/get-invitation").json().get('invitation', '')
+    )
     if details:
         b64_invite = None
         try:
@@ -113,6 +129,26 @@ async def check_existent_connection(agent_container):
         return False
 
 
+def get_local_server_address():
+    global LOCAL_SERVER_HOSTNAME
+    local_server_ip = ''
+    try:
+        regex_search = re.search('([0-9]{1,3}\\.){3}[0-9]{1,3}', LOCAL_SERVER_ADDRESS)
+        if regex_search is not None and regex_search.group() == LOCAL_SERVER_ADDRESS:
+            local_server_ip = LOCAL_SERVER_ADDRESS
+        elif not LOCAL_SERVER_HOSTNAME.endswith('.local') and len(LOCAL_SERVER_HOSTNAME) > 0:
+            LOCAL_SERVER_HOSTNAME += 'local'
+            local_server_ip = socket.gethostbyname(LOCAL_SERVER_HOSTNAME)
+        elif LOCAL_SERVER_HOSTNAME.endswith('.local') and len(LOCAL_SERVER_HOSTNAME) > len('.local'):
+            local_server_ip = socket.gethostbyname(LOCAL_SERVER_HOSTNAME)
+    except socket.gaierror:
+        # server not found
+        raise Exception(
+            f"Address of hostname {LOCAL_SERVER_HOSTNAME} not found! Check if you are connected to the same network"
+        )
+    return local_server_ip
+
+
 async def main(args):
     alice_agent = await create_agent_with_args(args, ident="alice")
 
@@ -126,7 +162,7 @@ async def main(args):
             )
         )
         agent = AliceAgent(
-            "alice.agent2",
+            AGENT_NAME,
             alice_agent.start_port,
             alice_agent.start_port + 1,
             genesis_data=alice_agent.genesis_txns,
@@ -145,12 +181,12 @@ async def main(args):
         log_status("#9 Input faber.py invitation details")
         is_already_connected = await check_existent_connection(alice_agent)
         if not is_already_connected:
-            await input_invitation(alice_agent)
+            await connect_local(alice_agent)
 
-        options = "    (3) Send Message\n" + "    (4) Input New Invitation\n" + "   (5) Interogate postgres"
+        options = "    (3) Send Message\n"
         if alice_agent.endorser_role and alice_agent.endorser_role == "author":
             options += "    (D) Set Endorser's DID\n"
-        options += "    (X) Exit?\n[3/4/X] "
+        options += "    (X) Exit?\n[3/X] "
         async for option in prompt_loop(options):
             if option is not None:
                 option = option.strip()
@@ -165,15 +201,6 @@ async def main(args):
                         f"/connections/{alice_agent.agent.connection_id}/send-message",
                         {"content": msg},
                     )
-
-            elif option == "4":
-                # handle new invitation
-                log_status("Input new invitation details")
-                await input_invitation(alice_agent)
-
-            elif option == "5":
-                await alice_agent.agent.print_postgres_content()
-                log_status("file written")
 
         if alice_agent.show_timing:
             timing = await alice_agent.agent.fetch_timing()
@@ -190,7 +217,7 @@ async def main(args):
         os._exit(1)
 
 
-if __name__ == "__main__":
+def runAgentAsModule():
     parser = arg_parser(ident="alice", port=8030)
     args = parser.parse_args()
 
@@ -228,3 +255,79 @@ if __name__ == "__main__":
         asyncio.get_event_loop().run_until_complete(main(args))
     except KeyboardInterrupt:
         os._exit(1)
+
+
+async def runAgent(ip):
+    parser = arg_parser(ident="alice", port=8030)
+    args = parser.parse_args()
+    # check_requires(args)
+
+    alice_agent = await create_agent_with_args(args, ident="alice")
+
+    try:
+        log_status(
+            "#7 Provision an agent and wallet, get back configuration details"
+            + (
+                f" (Wallet type: {alice_agent.wallet_type})"
+                if alice_agent.wallet_type
+                else ""
+            )
+        )
+        agent = AliceAgent(
+            AGENT_NAME,
+            alice_agent.start_port,
+            alice_agent.start_port + 1,
+            genesis_data=alice_agent.genesis_txns,
+            no_auto=alice_agent.no_auto,
+            tails_server_base_url=alice_agent.tails_server_base_url,
+            revocation=alice_agent.revocation,
+            timing=alice_agent.show_timing,
+            mediation=alice_agent.mediation,
+            wallet_type=alice_agent.wallet_type,
+            aip=alice_agent.aip,
+            endorser_role=alice_agent.endorser_role,
+            external_host=ip
+        )
+
+        await alice_agent.initialize(the_agent=agent)
+
+        log_status("#9 Input faber.py invitation details")
+        is_already_connected = await check_existent_connection(alice_agent)
+        if not is_already_connected:
+            await connect_local(alice_agent)
+
+        options = "    (3) Send Message\n"
+        if alice_agent.endorser_role and alice_agent.endorser_role == "author":
+            options += "    (D) Set Endorser's DID\n"
+        options += "    (X) Exit?\n[3/X] "
+        async for option in prompt_loop(options):
+            if option is not None:
+                option = option.strip()
+
+            if option is None or option in "xX":
+                break
+
+            elif option == "3":
+                msg = await prompt("Enter message: ")
+                if msg:
+                    await alice_agent.agent.admin_POST(
+                        f"/connections/{alice_agent.agent.connection_id}/send-message",
+                        {"content": msg},
+                    )
+
+        if alice_agent.show_timing:
+            timing = await alice_agent.agent.fetch_timing()
+            if timing:
+                for line in alice_agent.agent.format_timing(timing):
+                    log_msg(line)
+
+    finally:
+        terminated = await alice_agent.terminate()
+
+    await asyncio.sleep(0.1)
+
+    if not terminated:
+        os._exit(1)
+
+if __name__ == "__main__":
+    runAgentAsModule()

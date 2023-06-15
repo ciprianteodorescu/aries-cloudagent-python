@@ -427,7 +427,7 @@ async def main(args):
         os._exit(1)
 
 
-def runFaberAgentSeparately():
+def runAgentAsModule():
     parser = arg_parser(ident="faber", port=8020)
     args = parser.parse_args()
 
@@ -535,4 +535,4 @@ async def check_existent_connection(agent_container):
 
 
 if __name__ == "__main__":
-    runFaberAgentSeparately()
+    runAgentAsModule()
