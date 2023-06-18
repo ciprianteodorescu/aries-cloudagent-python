@@ -33,11 +33,11 @@ LOCAL_SERVER_ADDRESS = os.getenv('LOCAL_SERVER_ADDRESS', '')
 LOCAL_SERVER_HOSTNAME = os.getenv('LOCAL_SERVER_HOSTNAME', 'MacBook-Pro-6.local')
 LOCAL_SERVER_PORT = os.getenv('LOCAL_SERVER_PORT', '5040')
 
-AGENT_NAME = os.getenv('AGENT_NAME', 'alice.agent4')
+AGENT_NAME = os.getenv('AGENT_NAME', 'alice.agent.test8')
 USERNAME = os.getenv('USERNAME', 'cip')
 
 
-class AliceAgent(AriesAgent):
+class RaspberryAgent(AriesAgent):
     def __init__(
             self,
             ident: str,
@@ -117,7 +117,25 @@ async def connect_local(agent_container):
                 log_msg("Invalid invitation:", str(e))
 
     with log_timer("Connect duration:"):
-        connection = await agent_container.input_invitation(details, wait=True)
+        await agent_container.input_invitation(details, wait=True)
+
+    try:
+        connection = await agent_container.agent.admin_GET(
+            f"/connections/{agent_container.agent.connection_id}"
+        )
+        # add user metadata to the connection
+        server_connection_id = requests.get(
+            url=f"http://{local_server_ip}:{LOCAL_SERVER_PORT}/get-connection-from-did/{connection['my_did']}",
+        ).json()["connection_id"]
+
+        requests.post(
+            url=f"http://{local_server_ip}:{LOCAL_SERVER_PORT}/set-connection-user/{server_connection_id}",
+            json={"user": USERNAME},
+        )
+    except:
+        log_msg("Could not update associated user.")
+
+    print("Done!")
 
 
 async def check_existent_connection(agent_container):
@@ -150,41 +168,41 @@ def get_local_server_address():
 
 
 async def main(args):
-    alice_agent = await create_agent_with_args(args, ident="alice")
+    raspberry_agent = await create_agent_with_args(args, ident="alice")
 
     try:
         log_status(
             "#7 Provision an agent and wallet, get back configuration details"
             + (
-                f" (Wallet type: {alice_agent.wallet_type})"
-                if alice_agent.wallet_type
+                f" (Wallet type: {raspberry_agent.wallet_type})"
+                if raspberry_agent.wallet_type
                 else ""
             )
         )
-        agent = AliceAgent(
+        agent = RaspberryAgent(
             AGENT_NAME,
-            alice_agent.start_port,
-            alice_agent.start_port + 1,
-            genesis_data=alice_agent.genesis_txns,
-            no_auto=alice_agent.no_auto,
-            tails_server_base_url=alice_agent.tails_server_base_url,
-            revocation=alice_agent.revocation,
-            timing=alice_agent.show_timing,
-            mediation=alice_agent.mediation,
-            wallet_type=alice_agent.wallet_type,
-            aip=alice_agent.aip,
-            endorser_role=alice_agent.endorser_role,
+            raspberry_agent.start_port,
+            raspberry_agent.start_port + 1,
+            genesis_data=raspberry_agent.genesis_txns,
+            no_auto=raspberry_agent.no_auto,
+            tails_server_base_url=raspberry_agent.tails_server_base_url,
+            revocation=raspberry_agent.revocation,
+            timing=raspberry_agent.show_timing,
+            mediation=raspberry_agent.mediation,
+            wallet_type=raspberry_agent.wallet_type,
+            aip=raspberry_agent.aip,
+            endorser_role=raspberry_agent.endorser_role,
         )
 
-        await alice_agent.initialize(the_agent=agent)
+        await raspberry_agent.initialize(the_agent=agent)
 
-        log_status("#9 Input faber.py invitation details")
-        is_already_connected = await check_existent_connection(alice_agent)
+        log_status("#9 Input server_agent.py invitation details")
+        is_already_connected = await check_existent_connection(raspberry_agent)
         if not is_already_connected:
-            await connect_local(alice_agent)
+            await connect_local(raspberry_agent)
 
         options = "    (3) Send Message\n"
-        if alice_agent.endorser_role and alice_agent.endorser_role == "author":
+        if raspberry_agent.endorser_role and raspberry_agent.endorser_role == "author":
             options += "    (D) Set Endorser's DID\n"
         options += "    (X) Exit?\n[3/X] "
         async for option in prompt_loop(options):
@@ -197,19 +215,19 @@ async def main(args):
             elif option == "3":
                 msg = await prompt("Enter message: ")
                 if msg:
-                    await alice_agent.agent.admin_POST(
-                        f"/connections/{alice_agent.agent.connection_id}/send-message",
+                    await raspberry_agent.agent.admin_POST(
+                        f"/connections/{raspberry_agent.agent.connection_id}/send-message",
                         {"content": msg},
                     )
 
-        if alice_agent.show_timing:
-            timing = await alice_agent.agent.fetch_timing()
+        if raspberry_agent.show_timing:
+            timing = await raspberry_agent.agent.fetch_timing()
             if timing:
-                for line in alice_agent.agent.format_timing(timing):
+                for line in raspberry_agent.agent.format_timing(timing):
                     log_msg(line)
 
     finally:
-        terminated = await alice_agent.terminate()
+        terminated = await raspberry_agent.terminate()
 
     await asyncio.sleep(0.1)
 
@@ -262,42 +280,42 @@ async def runAgent(ip):
     args = parser.parse_args()
     # check_requires(args)
 
-    alice_agent = await create_agent_with_args(args, ident="alice")
+    raspberry_agent = await create_agent_with_args(args, ident="alice")
 
     try:
         log_status(
             "#7 Provision an agent and wallet, get back configuration details"
             + (
-                f" (Wallet type: {alice_agent.wallet_type})"
-                if alice_agent.wallet_type
+                f" (Wallet type: {raspberry_agent.wallet_type})"
+                if raspberry_agent.wallet_type
                 else ""
             )
         )
-        agent = AliceAgent(
+        agent = RaspberryAgent(
             AGENT_NAME,
-            alice_agent.start_port,
-            alice_agent.start_port + 1,
-            genesis_data=alice_agent.genesis_txns,
-            no_auto=alice_agent.no_auto,
-            tails_server_base_url=alice_agent.tails_server_base_url,
-            revocation=alice_agent.revocation,
-            timing=alice_agent.show_timing,
-            mediation=alice_agent.mediation,
-            wallet_type=alice_agent.wallet_type,
-            aip=alice_agent.aip,
-            endorser_role=alice_agent.endorser_role,
+            raspberry_agent.start_port,
+            raspberry_agent.start_port + 1,
+            genesis_data=raspberry_agent.genesis_txns,
+            no_auto=raspberry_agent.no_auto,
+            tails_server_base_url=raspberry_agent.tails_server_base_url,
+            revocation=raspberry_agent.revocation,
+            timing=raspberry_agent.show_timing,
+            mediation=raspberry_agent.mediation,
+            wallet_type=raspberry_agent.wallet_type,
+            aip=raspberry_agent.aip,
+            endorser_role=raspberry_agent.endorser_role,
             external_host=ip
         )
 
-        await alice_agent.initialize(the_agent=agent)
+        await raspberry_agent.initialize(the_agent=agent)
 
-        log_status("#9 Input faber.py invitation details")
-        is_already_connected = await check_existent_connection(alice_agent)
+        log_status("#9 Input server_agent.py invitation details")
+        is_already_connected = await check_existent_connection(raspberry_agent)
         if not is_already_connected:
-            await connect_local(alice_agent)
+            await connect_local(raspberry_agent)
 
         options = "    (3) Send Message\n"
-        if alice_agent.endorser_role and alice_agent.endorser_role == "author":
+        if raspberry_agent.endorser_role and raspberry_agent.endorser_role == "author":
             options += "    (D) Set Endorser's DID\n"
         options += "    (X) Exit?\n[3/X] "
         async for option in prompt_loop(options):
@@ -310,19 +328,19 @@ async def runAgent(ip):
             elif option == "3":
                 msg = await prompt("Enter message: ")
                 if msg:
-                    await alice_agent.agent.admin_POST(
-                        f"/connections/{alice_agent.agent.connection_id}/send-message",
+                    await raspberry_agent.agent.admin_POST(
+                        f"/connections/{raspberry_agent.agent.connection_id}/send-message",
                         {"content": msg},
                     )
 
-        if alice_agent.show_timing:
-            timing = await alice_agent.agent.fetch_timing()
+        if raspberry_agent.show_timing:
+            timing = await raspberry_agent.agent.fetch_timing()
             if timing:
-                for line in alice_agent.agent.format_timing(timing):
+                for line in raspberry_agent.agent.format_timing(timing):
                     log_msg(line)
 
     finally:
-        terminated = await alice_agent.terminate()
+        terminated = await raspberry_agent.terminate()
 
     await asyncio.sleep(0.1)
 
