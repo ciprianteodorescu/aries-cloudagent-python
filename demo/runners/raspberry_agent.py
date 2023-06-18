@@ -309,37 +309,12 @@ async def runAgent(ip):
 
         await raspberry_agent.initialize(the_agent=agent)
 
-        log_status("#9 Input server_agent.py invitation details")
         is_already_connected = await check_existent_connection(raspberry_agent)
         if not is_already_connected:
             await connect_local(raspberry_agent)
 
-        options = "    (3) Send Message\n"
-        if raspberry_agent.endorser_role and raspberry_agent.endorser_role == "author":
-            options += "    (D) Set Endorser's DID\n"
-        options += "    (X) Exit?\n[3/X] "
-        async for option in prompt_loop(options):
-            if option is not None:
-                option = option.strip()
-
-            if option is None or option in "xX":
-                break
-
-            elif option == "3":
-                msg = await prompt("Enter message: ")
-                if msg:
-                    await raspberry_agent.agent.admin_POST(
-                        f"/connections/{raspberry_agent.agent.connection_id}/send-message",
-                        {"content": msg},
-                    )
-
-        if raspberry_agent.show_timing:
-            timing = await raspberry_agent.agent.fetch_timing()
-            if timing:
-                for line in raspberry_agent.agent.format_timing(timing):
-                    log_msg(line)
-
-    finally:
+        return raspberry_agent
+    except:
         terminated = await raspberry_agent.terminate()
 
     await asyncio.sleep(0.1)
