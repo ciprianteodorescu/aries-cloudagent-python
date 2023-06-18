@@ -317,10 +317,6 @@ async def runAgent(ip):
     except:
         terminated = await raspberry_agent.terminate()
 
-    await asyncio.sleep(0.1)
-
-    if not terminated:
-        os._exit(1)
 
 if __name__ == "__main__":
     runAgentAsModule()
