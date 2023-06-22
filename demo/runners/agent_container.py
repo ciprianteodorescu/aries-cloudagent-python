@@ -1006,6 +1006,16 @@ class AgentContainer:
         """
         return await self.agent.admin_GET(path, text=text, params=params)
 
+    async def admin_DELETE(self, path, text=False, params=None) -> dict:
+        """
+        Execute an admin DELETE request in the context of the current wallet.
+
+        path = /path/of/request
+        text = True if the expected response is text, False if json data
+        params = any additional parameters to pass with the request
+        """
+        return await self.agent.admin_DELETE(path, text=text, params=params)
+
     async def admin_POST(self, path, data=None, text=False, params=None) -> dict:
         """
         Execute an admin POST request in the context of the current wallet.

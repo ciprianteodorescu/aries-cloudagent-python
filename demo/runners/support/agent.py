@@ -849,6 +849,24 @@ class DemoAgent:
             self.log(f"Error during GET {path}: {str(e)}")
             raise
 
+    async def admin_DELETE(
+        self, path, text=False, params=None, headers=None
+    ) -> ClientResponse:
+        try:
+            EVENT_LOGGER.debug("Controller DELETE %s request to Agent", path)
+            response = await self.admin_request(
+                "DELETE", path, None, text, params, headers=headers
+            )
+            EVENT_LOGGER.debug(
+                "Response from DELETE %s received: \n%s",
+                path,
+                repr_json(response),
+            )
+            return response
+        except ClientError as e:
+            self.log(f"Error during DELETE {path}: {str(e)}")
+            raise
+
     async def admin_POST(
         self, path, data=None, text=False, params=None, headers=None
     ) -> ClientResponse:
