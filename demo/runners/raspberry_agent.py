@@ -33,7 +33,7 @@ LOCAL_SERVER_ADDRESS = os.getenv('LOCAL_SERVER_ADDRESS', '')
 LOCAL_SERVER_HOSTNAME = os.getenv('LOCAL_SERVER_HOSTNAME', 'MacBook-Pro-6.local')
 LOCAL_SERVER_PORT = os.getenv('LOCAL_SERVER_PORT', '5040')
 
-AGENT_NAME = os.getenv('AGENT_NAME', 'alice.agent.test8')
+AGENT_NAME = os.getenv('AGENT_NAME', 'raspi.agent.test.0')
 USERNAME = os.getenv('USERNAME', 'cip')
 
 
