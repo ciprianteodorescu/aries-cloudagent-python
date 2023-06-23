@@ -69,7 +69,7 @@ DEFAULT_EXTERNAL_HOST = AGENT_ENDPOINT
 DEFAULT_PYTHON_PATH = ".."
 PYTHON = os.getenv("PYTHON", sys.executable)
 
-START_TIMEOUT = float(os.getenv("START_TIMEOUT", 30.0))
+START_TIMEOUT = float(os.getenv("START_TIMEOUT", 60.0))
 
 GENESIS_URL = os.getenv("GENESIS_URL")
 # TODO: uncomment next line?
@@ -940,7 +940,7 @@ class DemoAgent:
             code = None
             text = None
             start = default_timer()
-            async with ClientSession(timeout=ClientTimeout(total=30.0)) as session:
+            async with ClientSession(timeout=ClientTimeout(total=60.0)) as session:
                 while default_timer() - start < timeout:
                     try:
                         async with session.get(url, headers=headers) as resp:
