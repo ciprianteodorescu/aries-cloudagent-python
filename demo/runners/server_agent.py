@@ -35,7 +35,7 @@ logging.basicConfig(level=logging.WARNING)
 LOGGER = logging.getLogger(__name__)
 
 
-class FaberAgent(AriesAgent):
+class ServerAgent(AriesAgent):
     def __init__(
             self,
             ident: str,
@@ -44,6 +44,7 @@ class FaberAgent(AriesAgent):
             no_auto: bool = False,
             endorser_role: str = None,
             revocation: bool = False,
+            external_host: str = None,
             **kwargs,
     ):
         super().__init__(
@@ -54,6 +55,7 @@ class FaberAgent(AriesAgent):
             no_auto=no_auto,
             endorser_role=endorser_role,
             revocation=revocation,
+            external_host=external_host,
             **kwargs,
         )
         self.connection_id = None
@@ -222,73 +224,61 @@ class FaberAgent(AriesAgent):
 
 
 async def main(args):
-    faber_agent = await create_agent_with_args(args, ident="faber")
+    server_agent = await create_agent_with_args(args, ident="faber")
 
     try:
         log_status(
             "#1 Provision an agent and wallet, get back configuration details"
             + (
-                f" (Wallet type: {faber_agent.wallet_type})"
-                if faber_agent.wallet_type
+                f" (Wallet type: {server_agent.wallet_type})"
+                if server_agent.wallet_type
                 else ""
             )
         )
-        agent = FaberAgent(
+        agent = ServerAgent(
             "faber.agent",
-            faber_agent.start_port,
-            faber_agent.start_port + 1,
-            genesis_data=faber_agent.genesis_txns,
-            no_auto=faber_agent.no_auto,
-            tails_server_base_url=faber_agent.tails_server_base_url,
-            revocation=faber_agent.revocation,
-            timing=faber_agent.show_timing,
-            mediation=faber_agent.mediation,
-            wallet_type=faber_agent.wallet_type,
-            seed=faber_agent.seed,
-            aip=faber_agent.aip,
-            endorser_role=faber_agent.endorser_role,
+            server_agent.start_port,
+            server_agent.start_port + 1,
+            genesis_data=server_agent.genesis_txns,
+            no_auto=server_agent.no_auto,
+            tails_server_base_url=server_agent.tails_server_base_url,
+            revocation=server_agent.revocation,
+            timing=server_agent.show_timing,
+            mediation=server_agent.mediation,
+            wallet_type=server_agent.wallet_type,
+            seed=server_agent.seed,
+            aip=server_agent.aip,
+            endorser_role=server_agent.endorser_role,
         )
 
-        faber_schema_name = "degree schema"
-        faber_schema_attrs = [
-            "name",
-            "date",
-            "degree",
-            "birthdate_dateint",
-            "timestamp",
-        ]
-        if faber_agent.cred_type == CRED_FORMAT_INDY:
-            faber_agent.public_did = True
-            await faber_agent.initialize(
+        if server_agent.cred_type == CRED_FORMAT_INDY:
+            server_agent.public_did = True
+            await server_agent.initialize(
                 the_agent=agent,
-                schema_name=faber_schema_name,
-                schema_attrs=faber_schema_attrs,
-                create_endorser_agent=(faber_agent.endorser_role == "author")
-                if faber_agent.endorser_role
+                create_endorser_agent=(server_agent.endorser_role == "author")
+                if server_agent.endorser_role
                 else False,
             )
         else:
-            raise Exception("Invalid credential type:" + faber_agent.cred_type)
+            raise Exception("Invalid credential type:" + server_agent.cred_type)
 
         # generate an invitation for Alice
-        await faber_agent.generate_invitation(
-            display_qr=True, reuse_connections=faber_agent.reuse_connections, wait=True
+        await server_agent.generate_invitation(
+            display_qr=True, reuse_connections=server_agent.reuse_connections, wait=True
         )
 
         exchange_tracing = False
         options = (
-            "    (1) Issue Credential\n"
-            "    (2) Send Proof Request\n"
-            "    (3) Send Message\n"
-            "    (4) Create New Invitation\n"
+            "    (1) Send Message\n"
+            "    (2) Create New Invitation\n"
         )
-        if faber_agent.revocation:
+        if server_agent.revocation:
             options += "    (5) Revoke Credential\n" "    (6) Publish Revocations\n"
-        if faber_agent.endorser_role and faber_agent.endorser_role == "author":
+        if server_agent.endorser_role and server_agent.endorser_role == "author":
             options += "    (D) Set Endorser's DID\n"
         options += "    (T) Toggle tracing on credential/proof exchange\n"
         options += "    (X) Exit?\n[1/2/3/4/{}T/X] ".format(
-            "5/6/" if faber_agent.revocation else "",
+            "5/6/" if server_agent.revocation else "",
         )
         async for option in prompt_loop(options):
             if option is not None:
@@ -306,118 +296,31 @@ async def main(args):
                 )
 
             elif option == "1":
-                log_status("#13 Issue credential offer to X")
-
-                if faber_agent.aip == 20:
-                    if faber_agent.cred_type == CRED_FORMAT_INDY:
-                        offer_request = faber_agent.agent.generate_credential_offer(
-                            faber_agent.aip,
-                            faber_agent.cred_type,
-                            faber_agent.cred_def_id,
-                            exchange_tracing,
-                        )
-
-                    else:
-                        raise Exception(
-                            f"Error invalid credential type: {faber_agent.cred_type}"
-                        )
-
-                    await faber_agent.agent.admin_POST(
-                        "/issue-credential-2.0/send-offer", offer_request
-                    )
-
-                else:
-                    raise Exception(f"Error invalid AIP level: {faber_agent.aip}")
-
-            elif option == "2":
-                log_status("#20 Request proof of degree from alice")
-
-                if faber_agent.aip == 20:
-                    if faber_agent.cred_type == CRED_FORMAT_INDY:
-                        proof_request_web_request = (
-                            faber_agent.agent.generate_proof_request_web_request(
-                                faber_agent.aip,
-                                faber_agent.cred_type,
-                                faber_agent.revocation,
-                                exchange_tracing,
-                            )
-                        )
-
-                    else:
-                        raise Exception(
-                            "Error invalid credential type:" + faber_agent.cred_type
-                        )
-
-                    await agent.admin_POST(
-                        "/present-proof-2.0/send-request", proof_request_web_request
-                    )
-
-                else:
-                    raise Exception(f"Error invalid AIP level: {faber_agent.aip}")
-
-            elif option == "3":
                 msg = await prompt("Enter message: ")
-                await faber_agent.agent.admin_POST(
-                    f"/connections/{faber_agent.agent.connection_id}/send-message",
+                await server_agent.agent.admin_POST(
+                    f"/connections/{server_agent.agent.connection_id}/send-message",
                     {"content": msg},
                 )
 
-            elif option == "4":
+            elif option == "2":
                 log_msg(
                     "Creating a new invitation, please receive "
                     "and accept this invitation using Alice agent"
                 )
-                await faber_agent.generate_invitation(
+                await server_agent.generate_invitation(
                     display_qr=True,
-                    reuse_connections=faber_agent.reuse_connections,
+                    reuse_connections=server_agent.reuse_connections,
                     wait=True,
                 )
 
-            elif option == "5" and faber_agent.revocation:
-                rev_reg_id = (await prompt("Enter revocation registry ID: ")).strip()
-                cred_rev_id = (await prompt("Enter credential revocation ID: ")).strip()
-                publish = (
-                              await prompt("Publish now? [Y/N]: ", default="N")
-                          ).strip() in "yY"
-                try:
-                    await faber_agent.agent.admin_POST(
-                        "/revocation/revoke",
-                        {
-                            "rev_reg_id": rev_reg_id,
-                            "cred_rev_id": cred_rev_id,
-                            "publish": publish,
-                            "connection_id": faber_agent.agent.connection_id,
-                            # leave out thread_id, let aca-py generate
-                            # "thread_id": "12345678-4444-4444-4444-123456789012",
-                            "comment": "Revocation reason goes here ...",
-                        },
-                    )
-                except ClientError:
-                    pass
-
-            elif option == "6" and faber_agent.revocation:
-                try:
-                    resp = await faber_agent.agent.admin_POST(
-                        "/revocation/publish-revocations", {}
-                    )
-                    faber_agent.agent.log(
-                        "Published revocations for {} revocation registr{} {}".format(
-                            len(resp["rrid2crid"]),
-                            "y" if len(resp["rrid2crid"]) == 1 else "ies",
-                            json.dumps([k for k in resp["rrid2crid"]], indent=4),
-                        )
-                    )
-                except ClientError:
-                    pass
-
-        if faber_agent.show_timing:
-            timing = await faber_agent.agent.fetch_timing()
+        if server_agent.show_timing:
+            timing = await server_agent.agent.fetch_timing()
             if timing:
-                for line in faber_agent.agent.format_timing(timing):
+                for line in server_agent.agent.format_timing(timing):
                     log_msg(line)
 
     finally:
-        terminated = await faber_agent.terminate()
+        terminated = await server_agent.terminate()
 
     await asyncio.sleep(0.1)
 
@@ -425,7 +328,7 @@ async def main(args):
         os._exit(1)
 
 
-def runFaberAgentSeparately():
+def runAgentAsModule():
     parser = arg_parser(ident="faber", port=8020)
     args = parser.parse_args()
 
@@ -463,61 +366,64 @@ def runFaberAgentSeparately():
         os._exit(1)
 
 
-async def runFaberAgentForWebApp():
+async def runServerAgentForWebApp(ip):
     parser = arg_parser(ident="faber", port=8020)
     args = parser.parse_args()
-    faber_agent = await create_agent_with_args(args, ident="faber")
+    server_agent = await create_agent_with_args(args, ident="faber")
+    server_agent.seed = "32100000000032100000003210000000"
 
     try:
         log_status(
             "#1 Provision an agent and wallet, get back configuration details"
             + (
-                f" (Wallet type: {faber_agent.wallet_type})"
-                if faber_agent.wallet_type
+                f" (Wallet type: {server_agent.wallet_type})"
+                if server_agent.wallet_type
                 else ""
             )
         )
-        agent = FaberAgent(
-            "faber.agent",
-            faber_agent.start_port,
-            faber_agent.start_port + 1,
-            genesis_data=faber_agent.genesis_txns,
-            no_auto=faber_agent.no_auto,
-            tails_server_base_url=faber_agent.tails_server_base_url,
-            revocation=faber_agent.revocation,
-            timing=faber_agent.show_timing,
-            mediation=faber_agent.mediation,
-            wallet_type=faber_agent.wallet_type,
-            seed=faber_agent.seed,
-            aip=faber_agent.aip,
-            endorser_role=faber_agent.endorser_role,
+        agent = ServerAgent(
+            "faber.agent.test", #"server.agent.0",
+            server_agent.start_port,
+            server_agent.start_port + 1,
+            genesis_data=server_agent.genesis_txns,
+            no_auto=server_agent.no_auto,
+            tails_server_base_url=server_agent.tails_server_base_url,
+            revocation=server_agent.revocation,
+            timing=server_agent.show_timing,
+            mediation=server_agent.mediation,
+            wallet_type=server_agent.wallet_type,
+            seed=server_agent.seed,
+            aip=server_agent.aip,
+            endorser_role=server_agent.endorser_role,
+            external_host=ip,
         )
 
-        faber_schema_name = "degree schema"
-        faber_schema_attrs = [
-            "name",
-            "date",
-            "degree",
-            "birthdate_dateint",
-            "timestamp",
-        ]
-        if faber_agent.cred_type == CRED_FORMAT_INDY:
-            faber_agent.public_did = True
-            await faber_agent.initialize(
+        if server_agent.cred_type == CRED_FORMAT_INDY:
+            server_agent.public_did = True
+            await server_agent.initialize(
                 the_agent=agent,
-                schema_name=faber_schema_name,
-                schema_attrs=faber_schema_attrs,
-                create_endorser_agent=(faber_agent.endorser_role == "author")
-                if faber_agent.endorser_role
+                create_endorser_agent=(server_agent.endorser_role == "author")
+                if server_agent.endorser_role
                 else False,
             )
         else:
-            raise Exception("Invalid credential type:" + faber_agent.cred_type)
+            raise Exception("Invalid credential type:" + server_agent.cred_type)
+
+        # detect previous connection
+        await check_existent_connection(server_agent)
 
         print("initialized faber agent")
-        return faber_agent
+        return server_agent
     except:
-        terminated = await faber_agent.terminate()
+        terminated = await server_agent.terminate()
+
+
+async def check_existent_connection(agent_container):
+    connections = await agent_container.agent.admin_GET(f"/connections")
+    if len(connections["results"]) > 0 and "connection_id" in connections["results"][0].keys():
+        agent_container.agent.connection_id = connections["results"][0]["connection_id"]
+    print(connections)
+
 
 if __name__ == "__main__":
-    runFaberAgentSeparately()
+    runAgentAsModule()

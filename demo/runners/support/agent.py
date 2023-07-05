@@ -42,27 +42,26 @@ TRACE_ENABLED = os.getenv("TRACE_ENABLED")
 
 WEBHOOK_TARGET = os.getenv("WEBHOOK_TARGET")
 
-AGENT_ENDPOINT = os.getenv("AGENT_ENDPOINT")
-if AGENT_ENDPOINT is None:
-    if os.popen("uname").read().strip() == "Darwin":
-        # determine if we need to go back to find the script
-        wd = os.popen("pwd").read().strip().split("/")
-        proj_i = 0
-        for i in range(len(wd)):
-            if wd[i] == IP_SCRIPT_DIR:
-                proj_i = i
-                break
-        back = len(wd) - proj_i - 1
+AGENT_ENDPOINT = None
+if os.popen("uname").read().strip() == "Darwin":
+    # determine if we need to go back to find the script
+    wd = os.popen("pwd").read().strip().split("/")
+    proj_i = 0
+    for i in range(len(wd)):
+        if wd[i] == IP_SCRIPT_DIR:
+            proj_i = i
+            break
+    back = len(wd) - proj_i - 1
 
-        # run the script
-        if back == 0:
-            AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
-        else:
-            command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
-            AGENT_ENDPOINT = os.popen(command).read().strip()
+    # run the script
+    if back == 0:
+        AGENT_ENDPOINT = os.popen("chmod +x ./macOS_get_ip.sh && ./macOS_get_ip.sh").read().strip()
+    else:
+        command = "chmod +x " + (back * "../") + "macOS_get_ip.sh && " + (back * "../") + "macOS_get_ip.sh"
+        AGENT_ENDPOINT = os.popen(command).read().strip()
 
-    elif os.popen("uname").read().strip() == "Linux":
-        AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
+elif os.popen("uname").read().strip() == "Linux":
+    AGENT_ENDPOINT = os.popen("ip route get 8.8.8.8 | grep -oP 'src \\K[^ ]+'").read().strip()
 
 DEFAULT_POSTGRES = bool(os.getenv("POSTGRES"))
 DEFAULT_INTERNAL_HOST = "127.0.0.1"
@@ -70,7 +69,7 @@ DEFAULT_EXTERNAL_HOST = AGENT_ENDPOINT
 DEFAULT_PYTHON_PATH = ".."
 PYTHON = os.getenv("PYTHON", sys.executable)
 
-START_TIMEOUT = float(os.getenv("START_TIMEOUT", 30.0))
+START_TIMEOUT = float(os.getenv("START_TIMEOUT", 60.0))
 
 GENESIS_URL = os.getenv("GENESIS_URL")
 # TODO: uncomment next line?
@@ -165,10 +164,10 @@ class DemoAgent:
         self.arg_file = arg_file
 
         self.admin_url = f"http://{self.internal_host}:{admin_port}"
-        if AGENT_ENDPOINT:
-            self.endpoint = f"http://{AGENT_ENDPOINT}:{http_port}"
-        else:
+        if self.external_host:
             self.endpoint = f"http://{self.external_host}:{http_port}"
+        elif AGENT_ENDPOINT:
+            self.endpoint = f"http://{AGENT_ENDPOINT}:{http_port}"
 
         self.webhook_port = None
         self.webhook_url = None
@@ -189,10 +188,8 @@ class DemoAgent:
         )
         self.storage_type = params.get("storage_type")
         self.wallet_type = "askar"
-        self.wallet_name = (
-            params.get("wallet_name") or self.ident.lower().replace(" ", "") + rand_name
-        )
-        self.wallet_key = params.get("wallet_key") or self.ident + rand_name
+        self.wallet_name = self.ident.lower().replace(" ", "")
+        self.wallet_key = self.ident.lower().replace(" ", "")
         self.did = None
         self.wallet_stats = []
 
@@ -849,6 +846,24 @@ class DemoAgent:
             self.log(f"Error during GET {path}: {str(e)}")
             raise
 
+    async def admin_DELETE(
+        self, path, text=False, params=None, headers=None
+    ) -> ClientResponse:
+        try:
+            EVENT_LOGGER.debug("Controller DELETE %s request to Agent", path)
+            response = await self.admin_request(
+                "DELETE", path, None, text, params, headers=headers
+            )
+            EVENT_LOGGER.debug(
+                "Response from DELETE %s received: \n%s",
+                path,
+                repr_json(response),
+            )
+            return response
+        except ClientError as e:
+            self.log(f"Error during DELETE {path}: {str(e)}")
+            raise
+
     async def admin_POST(
         self, path, data=None, text=False, params=None, headers=None
     ) -> ClientResponse:
@@ -922,7 +937,7 @@ class DemoAgent:
             code = None
             text = None
             start = default_timer()
-            async with ClientSession(timeout=ClientTimeout(total=3.0)) as session:
+            async with ClientSession(timeout=ClientTimeout(total=60.0)) as session:
                 while default_timer() - start < timeout:
                     try:
                         async with session.get(url, headers=headers) as resp:

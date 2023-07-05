@@ -34,7 +34,6 @@ from runners.support.utils import (  # noqa:E402
     log_timer,
 )
 
-
 CRED_PREVIEW_TYPE = "https://didcomm.org/issue-credential/2.0/credential-preview"
 SELF_ATTESTED = os.getenv("SELF_ATTESTED")
 TAILS_FILE_COUNT = int(os.getenv("TAILS_FILE_COUNT", 100))
@@ -55,6 +54,7 @@ class AriesAgent(DemoAgent):
         aip: int = 20,
         endorser_role: str = None,
         revocation: bool = False,
+        external_host: str = None,
         **kwargs,
     ):
         super().__init__(
@@ -75,6 +75,7 @@ class AriesAgent(DemoAgent):
                     "--auto-store-credential",
                 ]
             ),
+            external_host=external_host,
             **kwargs,
         )
         self.connection_id = None
@@ -477,10 +478,17 @@ class AriesAgent(DemoAgent):
     async def handle_basicmessages(self, message):
         print(message)
 
-        if "received your message" not in message["content"] and "role" not in message.keys():
+        if "received your message" not in message["content"] and \
+                "state" in message.keys() and message["state"] == "received":
             await self.admin_POST(f"/connections/{message['connection_id']}/store-message", data=message)
-
-        self.log("Received message:", message["content"])
+            self.log("Stored message:", message["content"])
+        else:
+            role = ""
+            if "role" in message.keys():
+                role = message["role"]
+            elif "state" in message.keys():
+                role = message["state"]
+            self.log(role + " message:", message["content"])
 
     async def handle_endorse_transaction(self, message):
         self.log("Received transaction message:", message.get("state"))
@@ -998,6 +1006,16 @@ class AgentContainer:
         """
         return await self.agent.admin_GET(path, text=text, params=params)
 
+    async def admin_DELETE(self, path, text=False, params=None) -> dict:
+        """
+        Execute an admin DELETE request in the context of the current wallet.
+
+        path = /path/of/request
+        text = True if the expected response is text, False if json data
+        params = any additional parameters to pass with the request
+        """
+        return await self.agent.admin_DELETE(path, text=text, params=params)
+
     async def admin_POST(self, path, data=None, text=False, params=None) -> dict:
         """
         Execute an admin POST request in the context of the current wallet.
@@ -1030,6 +1048,7 @@ class AgentContainer:
         params = any additional parameters to pass with the request
         """
         return await self.agent.admin_PUT(path, data=data, text=text, params=params)
+
 
 def arg_parser(ident: str = None, port: int = 8020):
     """
@@ -1241,6 +1260,7 @@ async def create_agent_with_args(args, ident: str = None):
     )
 
     return agent
+
 
 if __name__ == "__main__":
     parser = arg_parser()
