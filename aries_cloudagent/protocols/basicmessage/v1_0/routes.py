@@ -74,8 +74,6 @@ def basic_message_sort_key(basic_message):
     """Get the sorting key for a particular basic message"""
 
 
-
-
 @docs(tags=[DOCS_TAG], summary="Fetch all basic messages sent/received to/from connection")
 @match_info_schema(BasicConnIdMatchInfoSchema())
 @response_schema(BasicMessageListSchema(), 200, description="")

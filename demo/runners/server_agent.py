@@ -382,7 +382,7 @@ async def runServerAgentForWebApp(ip):
             )
         )
         agent = ServerAgent(
-            "faber.agent.test",
+            "faber.agent.test", #"server.agent.0",
             server_agent.start_port,
             server_agent.start_port + 1,
             genesis_data=server_agent.genesis_txns,

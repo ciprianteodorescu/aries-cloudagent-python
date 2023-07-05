@@ -189,10 +189,7 @@ class DemoAgent:
         self.storage_type = params.get("storage_type")
         self.wallet_type = "askar"
         self.wallet_name = self.ident.lower().replace(" ", "")
-        # (
-        #     params.get("wallet_name") or self.ident.lower().replace(" ", "") + rand_name
-        # )
-        self.wallet_key = self.ident.lower().replace(" ", "")  # params.get("wallet_key") or self.ident + rand_name
+        self.wallet_key = self.ident.lower().replace(" ", "")
         self.did = None
         self.wallet_stats = []
 
